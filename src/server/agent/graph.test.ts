@@ -79,7 +79,7 @@ describe("agent graph", () => {
     expect(names).toEqual([
       "listar_chamados",
       "consultar_chamado",
-      "registrar_escalonamento",
+      "propor_escalonamento",
     ]);
   });
 

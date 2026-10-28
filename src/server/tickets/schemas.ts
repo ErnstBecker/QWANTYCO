@@ -54,8 +54,22 @@ export const consultarChamadoOutputSchema = z.object({
 export const registrarEscalonamentoInputSchema = z
   .object({
     chamadoId: chamadoIdSchema,
-    resumo: z.string().trim().min(1).max(500),
-    justificativa: z.string().trim().min(1).max(1000),
+    resumo: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      .describe(
+        "Resumo do problema em 1-2 frases, usando apenas título e descrição do chamado consultado.",
+      ),
+    justificativa: z
+      .string()
+      .trim()
+      .min(1)
+      .max(1000)
+      .describe(
+        "Por que escalonar, citando dados do chamado (prioridade, cliente, impacto, datas). Texto completo, sem referências como 'acima'.",
+      ),
   })
   .strict();
 export const registrarEscalonamentoOutputSchema = z.object({

@@ -53,7 +53,7 @@ function setup(steps: ScriptStep[]) {
 
 const escalationScript = (args = escalation): ScriptStep[] => [
   toolCall("consultar_chamado", { id: args.chamadoId }, "call-1"),
-  toolCall("registrar_escalonamento", args, "call-2"),
+  toolCall("propor_escalonamento", args, "call-2"),
   replyFromLastTool,
 ];
 
@@ -95,7 +95,7 @@ describe("escalation approval", () => {
       ok: true,
       data: {
         status: "completed",
-        reply: "Escalonamento ESC-0001 registrado.",
+        reply: "Escalonamento ESC-0001 registrado para o CH-101.",
       },
     });
     const records = await ctx.deps.escalations.list();

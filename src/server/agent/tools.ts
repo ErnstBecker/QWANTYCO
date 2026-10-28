@@ -50,7 +50,7 @@ export const READ_TOOLS: readonly AgentTool[] = [
  * into a proposal and only writes after human approval.
  */
 export const registrarEscalonamentoTool: ApprovalTool = {
-  name: "registrar_escalonamento",
+  name: "propor_escalonamento",
   description:
     "Propõe o escalonamento de um chamado ABERTO para revisão humana. O registro só ocorre se uma pessoa aprovar a proposta; até lá, nada é gravado.",
   inputSchema: registrarEscalonamentoInputSchema,

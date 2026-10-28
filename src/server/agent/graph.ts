@@ -229,8 +229,13 @@ export function buildAgentGraph(options: AgentGraphOptions) {
       name: approvalTool.name,
       args: {},
     };
+    // The outcome is reported from the actual write result, not by the model,
+    // so the reply can never confirm a registration that did not happen.
+    const outcome = result.ok
+      ? `Escalonamento ${result.data.escalonamento.id} registrado para o ${chamadoId}.`
+      : `Não foi possível registrar o escalonamento do ${chamadoId}: ${result.error.message}. Nada foi registrado.`;
     return {
-      messages: [toolResultMessage(call, result)],
+      messages: [toolResultMessage(call, result), new AIMessage(outcome)],
       proposal: null,
       resolutions: { [proposal.id]: "approved" as const },
     };
@@ -254,7 +259,7 @@ export function buildAgentGraph(options: AgentGraphOptions) {
       (state) => (pendingApprovalCall(state) ? "propose" : "agent"),
       ["propose", "agent"],
     )
-    .addEdge("register", "agent")
+    .addEdge("register", END)
     .compile({ checkpointer: options.checkpointer });
 }
 
