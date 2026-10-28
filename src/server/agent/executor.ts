@@ -1,41 +1,89 @@
 import type { ToolCall } from "@langchain/core/messages/tool";
 import { ToolMessage } from "@langchain/core/messages";
 import { randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
+import { DeadlineError, withDeadline } from "../shared/deadline";
 import { fail, ok, type Result } from "../shared/result";
 import type { TicketDeps } from "../tickets/operations";
+import { TransientToolError } from "./faults";
 import type { AgentTool } from "./tools";
+
+export type ToolLimits = {
+  toolTimeoutMs: number;
+  toolMaxAttempts: number;
+  toolBackoffMs: number;
+};
 
 export type ExecutorContext = {
   /** Allowlist: only these tools can run, whatever the model asks for. */
   tools: readonly AgentTool[];
   deps: TicketDeps;
+  limits: ToolLimits;
+  /** Remaining active budget; a call never waits longer than this. */
+  remainingMs?: number;
 };
+
+type Execution = { result: Result<unknown>; attempts: number };
 
 async function runTool(
   call: ToolCall,
   ctx: ExecutorContext,
-): Promise<Result<unknown>> {
+): Promise<Execution> {
   const tool = ctx.tools.find((t) => t.name === call.name);
   if (!tool) {
-    return fail(
-      "UNKNOWN_TOOL",
-      `Ferramenta '${call.name}' não está disponível`,
-    );
+    return {
+      result: fail(
+        "UNKNOWN_TOOL",
+        `Ferramenta '${call.name}' não está disponível`,
+      ),
+      attempts: 0,
+    };
   }
 
-  let result: Result<unknown>;
-  try {
-    result = await tool.run(ctx.deps, call.args);
-  } catch {
-    return fail("TOOL_ERROR", `Falha ao executar '${call.name}'`);
+  const { toolTimeoutMs, toolMaxAttempts, toolBackoffMs } = ctx.limits;
+  const startedAt = Date.now();
+  for (let attempt = 1; attempt <= toolMaxAttempts; attempt++) {
+    const remaining = (ctx.remainingMs ?? Infinity) - (Date.now() - startedAt);
+    if (remaining <= 0) {
+      return {
+        result: fail("LIMIT_EXCEEDED", "Limite de execução atingido"),
+        attempts: attempt - 1,
+      };
+    }
+    try {
+      const result = await withDeadline(
+        () => tool.run(ctx.deps, call.args),
+        Math.min(toolTimeoutMs, remaining),
+      );
+      if (!result.ok) return { result, attempts: attempt };
+      const output = tool.outputSchema.safeParse(result.data);
+      return {
+        result: output.success
+          ? ok(output.data)
+          : fail("INVALID_OUTPUT", `Saída inválida de '${call.name}'`),
+        attempts: attempt,
+      };
+    } catch (error) {
+      const retryable =
+        error instanceof TransientToolError || error instanceof DeadlineError;
+      if (!retryable) {
+        return {
+          result: fail("TOOL_ERROR", `Falha ao executar '${call.name}'`),
+          attempts: attempt,
+        };
+      }
+      if (attempt < toolMaxAttempts) {
+        await sleep(toolBackoffMs * 2 ** (attempt - 1));
+      }
+    }
   }
-  if (!result.ok) return result;
-
-  const output = tool.outputSchema.safeParse(result.data);
-  if (!output.success) {
-    return fail("INVALID_OUTPUT", `Saída inválida de '${call.name}'`);
-  }
-  return ok(output.data);
+  return {
+    result: fail(
+      "TOOL_UNAVAILABLE",
+      `'${call.name}' indisponível após ${toolMaxAttempts} tentativas`,
+    ),
+    attempts: toolMaxAttempts,
+  };
 }
 
 /** Validates and runs each tool call, returning one ToolMessage per call. */
@@ -44,14 +92,20 @@ export async function executeToolCalls(
   ctx: ExecutorContext,
 ): Promise<ToolMessage[]> {
   const messages: ToolMessage[] = [];
+  const startedAt = Date.now();
   for (const call of calls) {
-    const result = await runTool(call, ctx);
+    const elapsed = Date.now() - startedAt;
+    const { result, attempts } = await runTool(call, {
+      ...ctx,
+      remainingMs: (ctx.remainingMs ?? Infinity) - elapsed,
+    });
     messages.push(
       new ToolMessage({
         tool_call_id: call.id ?? randomUUID(),
         name: call.name,
         status: result.ok ? "success" : "error",
         content: JSON.stringify(result),
+        artifact: { attempts },
       }),
     );
   }

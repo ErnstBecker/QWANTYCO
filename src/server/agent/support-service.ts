@@ -1,19 +1,20 @@
 import { HumanMessage } from "@langchain/core/messages";
-import { Command } from "@langchain/langgraph";
+import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { z } from "zod";
 import { fail, ok, type Result } from "../shared/result";
 import type { Escalonamento } from "../tickets/schemas";
 import type { TicketDeps } from "../tickets/operations";
-import type { AgentGraph } from "./graph";
+import { endTurnWithError, type AgentGraph } from "./graph";
 import { decisionSchema, type Proposal } from "./proposal";
-import type { AgentStateValue } from "./state";
+import { NEW_TURN, type AgentStateValue, type TurnError } from "./state";
 
 const sessionIdSchema = z.uuid();
 const messageSchema = z.string().trim().min(1).max(4000);
 
 export type TurnOutcome =
   | { status: "awaiting_approval"; proposal: Proposal }
-  | { status: "completed"; reply: string };
+  | { status: "completed"; reply: string }
+  | { status: "failed"; reply: string; error: TurnError };
 
 export type DecisionOutcome =
   | TurnOutcome
@@ -24,7 +25,10 @@ export type DecisionOutcome =
     }
   | { status: "already_processed"; resolution: "rejected" };
 
-type RunConfig = { configurable: { thread_id: string } };
+type RunConfig = {
+  configurable: { thread_id: string };
+  recursionLimit: number;
+};
 
 /** What the caller must run next: a graph input (invoke or stream) or a stored outcome. */
 export type PreparedTurn = { kind: "run"; input: unknown; config: RunConfig };
@@ -34,10 +38,19 @@ export type PreparedDecision =
 export function toTurnOutcome(state: AgentStateValue): TurnOutcome {
   if (state.proposal)
     return { status: "awaiting_approval", proposal: state.proposal };
-  return { status: "completed", reply: state.messages.at(-1)?.text ?? "" };
+  const reply = state.messages.at(-1)?.text ?? "";
+  if (state.error) return { status: "failed", reply, error: state.error };
+  return { status: "completed", reply };
 }
 
-export function createSupportService(graph: AgentGraph, deps: TicketDeps) {
+export type SupportServiceOptions = { recursionLimit?: number };
+
+export function createSupportService(
+  graph: AgentGraph,
+  deps: TicketDeps,
+  options: SupportServiceOptions = {},
+) {
+  const recursionLimit = options.recursionLimit ?? 15;
   const locks = new Map<string, Promise<unknown>>();
 
   /** Serializes work per session so concurrent requests cannot interleave. */
@@ -54,6 +67,7 @@ export function createSupportService(graph: AgentGraph, deps: TicketDeps) {
 
   const configFor = (sessionId: string): RunConfig => ({
     configurable: { thread_id: sessionId },
+    recursionLimit,
   });
 
   async function readState(sessionId: string) {
@@ -80,7 +94,12 @@ export function createSupportService(graph: AgentGraph, deps: TicketDeps) {
     }
     return ok({
       kind: "run",
-      input: { messages: [new HumanMessage(message.data)] },
+      // Each user message starts a fresh active-time and step budget.
+      input: {
+        messages: [new HumanMessage(message.data)],
+        turn: { ...NEW_TURN },
+        error: null,
+      },
       config: configFor(sessionId),
     });
   }
@@ -140,8 +159,43 @@ export function createSupportService(graph: AgentGraph, deps: TicketDeps) {
         );
   }
 
+  /**
+   * Last-resort guard: if the graph throws (e.g. recursion limit), the turn is
+   * closed with a controlled error so the session stays usable.
+   */
+  async function recover(config: RunConfig, error: unknown) {
+    const snapshot = await graph.getState(config);
+    const messages =
+      (snapshot.values as Partial<AgentStateValue>).messages ?? [];
+    const update =
+      error instanceof GraphRecursionError
+        ? endTurnWithError(
+            messages,
+            "LIMIT_EXCEEDED",
+            "Limite de passos do grafo atingido",
+          )
+        : endTurnWithError(
+            messages,
+            "INTERNAL_ERROR",
+            "Erro inesperado na execução",
+          );
+    await graph.updateState(config, update, "agent");
+    return (await graph.getState(config)).values as AgentStateValue;
+  }
+
+  async function run(prepared: PreparedTurn): Promise<TurnOutcome> {
+    let state: AgentStateValue;
+    try {
+      state = await graph.invoke(prepared.input as never, prepared.config);
+    } catch (error) {
+      state = await recover(prepared.config, error);
+    }
+    return toTurnOutcome(state);
+  }
+
   return {
     withSessionLock,
+    recover,
     prepareMessage,
     prepareDecision,
 
@@ -152,11 +206,7 @@ export function createSupportService(graph: AgentGraph, deps: TicketDeps) {
       return withSessionLock(sessionId, async () => {
         const prepared = await prepareMessage(sessionId, text);
         if (!prepared.ok) return prepared;
-        const state = await graph.invoke(
-          prepared.data.input as never,
-          prepared.data.config,
-        );
-        return ok(toTurnOutcome(state));
+        return ok(await run(prepared.data));
       });
     },
 
@@ -165,11 +215,7 @@ export function createSupportService(graph: AgentGraph, deps: TicketDeps) {
         const prepared = await prepareDecision(sessionId, body);
         if (!prepared.ok) return prepared;
         if (prepared.data.kind === "replay") return ok(prepared.data.outcome);
-        const state = await graph.invoke(
-          prepared.data.input as never,
-          prepared.data.config,
-        );
-        return ok(toTurnOutcome(state));
+        return ok(await run(prepared.data));
       });
     },
   };

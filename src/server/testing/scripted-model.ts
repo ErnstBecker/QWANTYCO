@@ -5,7 +5,8 @@ import {
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import type { ChatResult } from "@langchain/core/outputs";
 
-export type ScriptStep = AIMessage | ((messages: BaseMessage[]) => AIMessage);
+export type ScriptStep =
+  AIMessage | ((messages: BaseMessage[]) => AIMessage | Promise<AIMessage>);
 
 /**
  * Deterministic model double for offline tests: each invocation returns the
@@ -36,7 +37,7 @@ export class ScriptedChatModel extends BaseChatModel {
     }
     this.index += 1;
     this.calls.push(messages);
-    const message = typeof step === "function" ? step(messages) : step;
+    const message = typeof step === "function" ? await step(messages) : step;
     return { generations: [{ message, text: message.text }] };
   }
 }

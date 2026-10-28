@@ -10,7 +10,12 @@ export type ErrorCode =
   | "APPROVAL_PENDING"
   | "NO_PENDING_PROPOSAL"
   | "PROPOSAL_MISMATCH"
-  | "PROPOSAL_ALREADY_DECIDED";
+  | "PROPOSAL_ALREADY_DECIDED"
+  | "TOOL_UNAVAILABLE"
+  | "LIMIT_EXCEEDED"
+  | "MODEL_ERROR"
+  | "INVALID_MODEL_OUTPUT"
+  | "INTERNAL_ERROR";
 
 export type DomainError = { code: ErrorCode; message: string };
 
