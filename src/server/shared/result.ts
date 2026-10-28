@@ -1,5 +1,11 @@
 export type ErrorCode =
-  "INVALID_INPUT" | "NOT_FOUND" | "NOT_ESCALATABLE" | "IDEMPOTENCY_CONFLICT";
+  | "INVALID_INPUT"
+  | "NOT_FOUND"
+  | "NOT_ESCALATABLE"
+  | "IDEMPOTENCY_CONFLICT"
+  | "UNKNOWN_TOOL"
+  | "INVALID_OUTPUT"
+  | "TOOL_ERROR";
 
 export type DomainError = { code: ErrorCode; message: string };
 
