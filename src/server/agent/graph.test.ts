@@ -76,7 +76,11 @@ describe("agent graph", () => {
     const names = model.boundTools.map(
       (tool) => (tool as { function: { name: string } }).function.name,
     );
-    expect(names).toEqual(["listar_chamados", "consultar_chamado"]);
+    expect(names).toEqual([
+      "listar_chamados",
+      "consultar_chamado",
+      "registrar_escalonamento",
+    ]);
   });
 
   it("consults a ticket and reports unknown identifiers", async () => {
@@ -110,15 +114,11 @@ describe("agent graph", () => {
 
   it("never executes a tool outside the allowlist", async () => {
     const { ask, deps } = setup([
-      toolCall("registrar_escalonamento", {
-        chamadoId: "CH-101",
-        resumo: "x",
-        justificativa: "y",
-      }),
-      reply("Não posso registrar escalonamentos."),
+      toolCall("apagar_chamado", { id: "CH-101" }),
+      reply("Não posso apagar chamados."),
     ]);
 
-    const state = await ask("Escalone o CH-101");
+    const state = await ask("Apague o CH-101");
 
     expect(parse(toolMessages(state.messages)[0]!)).toMatchObject({
       error: { code: "UNKNOWN_TOOL" },

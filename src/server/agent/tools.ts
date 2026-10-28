@@ -11,6 +11,7 @@ import {
   consultarChamadoOutputSchema,
   listarChamadosInputSchema,
   listarChamadosOutputSchema,
+  registrarEscalonamentoInputSchema,
 } from "../tickets/schemas";
 
 export type AgentTool = {
@@ -44,8 +45,26 @@ export const READ_TOOLS: readonly AgentTool[] = [
   consultarChamadoTool,
 ];
 
+/**
+ * Bound to the model but never run by the executor: the graph turns the call
+ * into a proposal and only writes after human approval.
+ */
+export const registrarEscalonamentoTool: ApprovalTool = {
+  name: "registrar_escalonamento",
+  description:
+    "Propõe o escalonamento de um chamado ABERTO para revisão humana. O registro só ocorre se uma pessoa aprovar a proposta; até lá, nada é gravado.",
+  inputSchema: registrarEscalonamentoInputSchema,
+};
+
+export type ApprovalTool = Pick<
+  AgentTool,
+  "name" | "description" | "inputSchema"
+>;
+
 /** Provider-neutral definition sent to the model; execution never goes through it. */
-export function toToolDefinition(tool: AgentTool): ToolDefinition {
+export function toToolDefinition(
+  tool: AgentTool | ApprovalTool,
+): ToolDefinition {
   // Some providers reject the "$schema" meta key in tool parameters.
   const parameters: Record<string, unknown> = z.toJSONSchema(tool.inputSchema, {
     io: "input",

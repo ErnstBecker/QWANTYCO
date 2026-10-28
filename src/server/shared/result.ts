@@ -5,7 +5,12 @@ export type ErrorCode =
   | "IDEMPOTENCY_CONFLICT"
   | "UNKNOWN_TOOL"
   | "INVALID_OUTPUT"
-  | "TOOL_ERROR";
+  | "TOOL_ERROR"
+  | "REJECTED"
+  | "APPROVAL_PENDING"
+  | "NO_PENDING_PROPOSAL"
+  | "PROPOSAL_MISMATCH"
+  | "PROPOSAL_ALREADY_DECIDED";
 
 export type DomainError = { code: ErrorCode; message: string };
 
