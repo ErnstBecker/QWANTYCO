@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { api } from "@/lib/api-client";
 import { ChatPanel } from "./chat-panel";
 
 type SessionItem = { id: string; title: string };
@@ -26,10 +27,15 @@ function saveSessions(sessions: SessionItem[]) {
   }
 }
 
+const NEW_TITLE = "Nova conversa";
+
 const newSession = (): SessionItem => ({
   id: crypto.randomUUID(),
-  title: "Nova conversa",
+  title: NEW_TITLE,
 });
+
+/** A conversation keeps the default title until its first message. */
+const isEmpty = (session: SessionItem) => session.title === NEW_TITLE;
 
 export function SupportApp() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -50,9 +56,33 @@ export function SupportApp() {
   };
 
   const create = () => {
+    // Reuses an unused conversation instead of piling up empty ones.
+    const empty = sessions.find(isEmpty);
+    if (empty) {
+      setActiveId(empty.id);
+      return;
+    }
     const session = newSession();
     update([session, ...sessions]);
     setActiveId(session.id);
+  };
+
+  const remove = async (session: SessionItem) => {
+    if (
+      !window.confirm(`Excluir "${session.title}"? O histórico será apagado.`)
+    )
+      return;
+    try {
+      // Waits on the server for a running turn of this session to finish.
+      await api.deleteSession(session.id);
+    } catch {
+      window.alert("Não foi possível excluir a conversa.");
+      return;
+    }
+    const rest = sessions.filter((s) => s.id !== session.id);
+    const next = rest.length > 0 ? rest : [newSession()];
+    update(next);
+    if (session.id === activeId || rest.length === 0) setActiveId(next[0]!.id);
   };
 
   const rename = (id: string, text: string) => {
@@ -78,24 +108,39 @@ export function SupportApp() {
           className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible"
         >
           {sessions.map((session) => (
-            <button
+            <div
               key={session.id}
-              type="button"
-              onClick={() => setActiveId(session.id)}
-              aria-current={session.id === activeId ? "page" : undefined}
-              className={`shrink-0 truncate rounded-md px-2 py-1.5 text-left text-sm ${
+              className={`flex shrink-0 items-center rounded-md ${
                 session.id === activeId
                   ? "bg-zinc-200 dark:bg-zinc-800"
                   : "hover:bg-zinc-100 dark:hover:bg-zinc-900"
               }`}
             >
-              {session.title}
-            </button>
+              <button
+                type="button"
+                onClick={() => setActiveId(session.id)}
+                aria-current={session.id === activeId ? "page" : undefined}
+                className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-sm"
+              >
+                {session.title}
+              </button>
+              {session.id === activeId ? (
+                <button
+                  type="button"
+                  onClick={() => void remove(session)}
+                  aria-label={`Excluir conversa: ${session.title}`}
+                  title="Excluir conversa"
+                  className="mr-1 rounded px-2 text-zinc-500 hover:bg-zinc-300 hover:text-red-700 dark:hover:bg-zinc-700 dark:hover:text-red-400"
+                >
+                  <span aria-hidden>×</span>
+                </button>
+              ) : null}
+            </div>
           ))}
         </nav>
       </aside>
 
-      <main className="flex min-h-0 flex-1 flex-col">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         {activeId ? (
           <ChatPanel
             key={activeId}

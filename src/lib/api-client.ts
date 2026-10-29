@@ -61,4 +61,11 @@ export const api = {
     if (!response.ok) throw await failure(response);
     return (await response.json()) as SessionView;
   },
+
+  async deleteSession(sessionId: string): Promise<void> {
+    const response = await fetch(`/api/sessions/${sessionId}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) throw await failure(response);
+  },
 };

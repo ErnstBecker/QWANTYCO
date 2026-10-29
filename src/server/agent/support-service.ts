@@ -284,11 +284,30 @@ export function createSupportService(
     return ok({ sessionId, entries, proposal: state.proposal ?? null });
   }
 
+  /**
+   * Deletes the session's history and any pending proposal. Registered
+   * escalations are kept: they are records, not conversation state.
+   */
+  function deleteSession(sessionId: string): Promise<Result<null>> {
+    if (!sessionIdSchema.safeParse(sessionId).success) {
+      return Promise.resolve(fail("INVALID_INPUT", "Sessão inválida"));
+    }
+    // Waits for a running turn of this session to finish first.
+    return lock.run(sessionId, async () => {
+      const saver = graph.checkpointer;
+      if (saver && typeof saver !== "boolean") {
+        await saver.deleteThread(sessionId);
+      }
+      return ok(null);
+    });
+  }
+
   return {
     lock,
     recover,
     stream,
     getSession,
+    deleteSession,
     prepareMessage,
     prepareDecision,
 

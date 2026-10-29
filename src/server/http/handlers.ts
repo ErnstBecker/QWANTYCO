@@ -171,6 +171,16 @@ export async function handleGetSession(
   return result.ok ? Response.json(result.data) : errorResponse(result.error);
 }
 
+export async function handleDeleteSession(
+  sessionId: string,
+  service: SupportService,
+) {
+  const result = await service.deleteSession(sessionId);
+  return result.ok
+    ? new Response(null, { status: 204 })
+    : errorResponse(result.error);
+}
+
 /** Configuration problems (e.g. MODEL_PROVIDER unset) become a 503 without details. */
 export async function withRuntime(
   load: () => { service: SupportService },

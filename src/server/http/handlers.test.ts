@@ -18,6 +18,7 @@ import {
 import {
   handleApproval,
   handleChat,
+  handleDeleteSession,
   handleGetSession,
   withRuntime,
 } from "./handlers";
@@ -354,6 +355,52 @@ describe("GET /api/sessions/:id", () => {
       proposal: null,
     });
     expect((await handleGetSession("nope", ctx.service)).status).toBe(400);
+  });
+});
+
+describe("DELETE /api/sessions/:id", () => {
+  it("removes history and pending proposal, keeping registered escalations", async () => {
+    const ctx = setup([...escalationSteps, ...escalationSteps]);
+    const escalate = async (sessionId: string) => {
+      await readEvents(
+        await handleChat(
+          post({ sessionId, message: "Escalone o CH-101" }),
+          ctx.service,
+        ),
+      );
+      return (await (await handleGetSession(sessionId, ctx.service)).json())
+        .proposal.id as string;
+    };
+    const approve = (sessionId: string, proposalId: string) =>
+      handleApproval(
+        post({ sessionId, proposalId, decision: "approve" }),
+        ctx.service,
+      );
+
+    // Session A: approved and registered.
+    const approved = await escalate(ctx.sessionId);
+    await readEvents(await approve(ctx.sessionId, approved));
+    // Session B: proposal still pending.
+    const other = randomUUID();
+    const pending = await escalate(other);
+
+    for (const id of [ctx.sessionId, other]) {
+      expect((await handleDeleteSession(id, ctx.service)).status).toBe(204);
+      expect(await (await handleGetSession(id, ctx.service)).json()).toEqual({
+        sessionId: id,
+        entries: [],
+        proposal: null,
+      });
+    }
+    expect(await ctx.deps.escalations.list()).toHaveLength(1);
+    // The deleted proposal can no longer be approved.
+    expect((await approve(other, pending)).status).toBe(404);
+    expect(await ctx.deps.escalations.list()).toHaveLength(1);
+  });
+
+  it("answers 400 for an invalid id", async () => {
+    const ctx = setup([]);
+    expect((await handleDeleteSession("nope", ctx.service)).status).toBe(400);
   });
 });
 
