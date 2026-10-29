@@ -12,6 +12,8 @@
     "format:check": "prettier --check src *.ts *.mts *.mjs *.json",
     "test": "vitest run",
     "test:scenarios": "vitest run src/server/scenarios.test.ts --reporter verbose",
+    "eval": "tsx --env-file=.env src/server/eval/run.ts",
+    "eval:sabotage": "tsx --env-file=.env src/server/eval/run.ts --sabotage",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -37,6 +39,7 @@
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.10",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^5.0.5"
   },
