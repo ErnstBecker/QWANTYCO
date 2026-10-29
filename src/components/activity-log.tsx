@@ -11,7 +11,7 @@ const label = (name: string) => TOOL_LABELS[name] ?? name;
 /** Tool calls the model emitted and what the executor returned. */
 export function ActivityLog({ items }: { items: ActivityItem[] }) {
   return (
-    <ul className="w-fit max-w-full space-y-1 rounded-md border border-zinc-200 bg-zinc-50 p-2 font-mono text-xs dark:border-zinc-800 dark:bg-zinc-900">
+    <ul className="w-fit max-w-full space-y-1 [overflow-wrap:anywhere] rounded-md border border-zinc-200 bg-zinc-50 p-2 font-mono text-xs dark:border-zinc-800 dark:bg-zinc-900">
       {items.map((item, index) =>
         item.kind === "call" ? (
           <li

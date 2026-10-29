@@ -12,6 +12,12 @@ const components: Components = {
   strong: ({ children }) => (
     <strong className="font-semibold">{children}</strong>
   ),
+  // Code blocks scroll inside the bubble instead of widening the page.
+  pre: ({ children }) => (
+    <pre className="mb-2 max-w-full overflow-x-auto rounded bg-black/10 p-2 font-mono text-xs last:mb-0 dark:bg-white/10 [&>code]:bg-transparent [&>code]:p-0">
+      {children}
+    </pre>
+  ),
   code: ({ children }) => (
     <code className="rounded bg-black/10 px-1 font-mono text-[0.9em] dark:bg-white/10">
       {children}
