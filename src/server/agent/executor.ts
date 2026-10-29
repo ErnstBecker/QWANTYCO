@@ -40,6 +40,21 @@ async function runTool(
     };
   }
 
+  // Input contract is checked before the function runs at all.
+  const input = tool.inputSchema.safeParse(call.args);
+  if (!input.success) {
+    const detail = input.error.issues
+      .map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`)
+      .join("; ");
+    return {
+      result: fail(
+        "INVALID_INPUT",
+        `Argumentos inválidos para '${call.name}' (${detail})`,
+      ),
+      attempts: 0,
+    };
+  }
+
   const { toolTimeoutMs, toolMaxAttempts, toolBackoffMs } = ctx.limits;
   const startedAt = Date.now();
   for (let attempt = 1; attempt <= toolMaxAttempts; attempt++) {
@@ -52,7 +67,7 @@ async function runTool(
     }
     try {
       const result = await withDeadline(
-        () => tool.run(ctx.deps, call.args),
+        () => tool.run(ctx.deps, input.data),
         Math.min(toolTimeoutMs, remaining),
       );
       if (!result.ok) return { result, attempts: attempt };
