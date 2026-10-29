@@ -11,6 +11,7 @@
     "format": "prettier --write src *.ts *.mts *.mjs *.json",
     "format:check": "prettier --check src *.ts *.mts *.mjs *.json",
     "test": "vitest run",
+    "test:scenarios": "vitest run src/server/scenarios.test.ts --reporter verbose",
     "test:watch": "vitest"
   },
   "dependencies": {
