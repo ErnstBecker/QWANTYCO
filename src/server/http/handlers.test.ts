@@ -172,7 +172,7 @@ describe("POST /api/chat", () => {
     const session = await (
       await handleGetSession(ctx.sessionId, ctx.service)
     ).json();
-    expect(session.messages.map((m: { text: string }) => m.text)).toEqual([
+    expect(session.entries.map((e: { text: string }) => e.text)).toEqual([
       "1",
       "primeira",
       "2",
@@ -314,7 +314,7 @@ describe("POST /api/approval", () => {
 });
 
 describe("GET /api/sessions/:id", () => {
-  it("returns the visible history and the pending proposal", async () => {
+  it("returns history with tool activity and the pending proposal", async () => {
     const ctx = setup(escalationSteps);
     await readEvents(
       await handleChat(
@@ -329,7 +329,17 @@ describe("GET /api/sessions/:id", () => {
 
     expect(session).toMatchObject({
       sessionId: ctx.sessionId,
-      messages: [{ role: "user", text: "Escalone o CH-101" }],
+      entries: [
+        { type: "user", text: "Escalone o CH-101" },
+        {
+          type: "activity",
+          items: [
+            { kind: "call", name: "consultar_chamado", args: { id: "CH-101" } },
+            { kind: "result", name: "consultar_chamado", status: "success" },
+            { kind: "call", name: "propor_escalonamento" },
+          ],
+        },
+      ],
       proposal: { chamadoId: "CH-101", resumo: "Erro 500 no login" },
     });
   });
@@ -340,7 +350,7 @@ describe("GET /api/sessions/:id", () => {
       await (await handleGetSession(ctx.sessionId, ctx.service)).json(),
     ).toEqual({
       sessionId: ctx.sessionId,
-      messages: [],
+      entries: [],
       proposal: null,
     });
     expect((await handleGetSession("nope", ctx.service)).status).toBe(400);

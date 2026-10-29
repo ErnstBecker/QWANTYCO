@@ -6,7 +6,11 @@ import {
 } from "@langchain/core/messages";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { z } from "zod";
-import type { HistoryMessage, StreamEvent } from "@/lib/stream-events";
+import {
+  toActivityItem,
+  type HistoryEntry,
+  type StreamEvent,
+} from "@/lib/stream-events";
 import { fail, ok, type Result } from "../shared/result";
 import { createSessionLock } from "../shared/session-lock";
 import type { Escalonamento } from "../tickets/schemas";
@@ -234,23 +238,30 @@ export function createSupportService(
     yield { type: "done", outcome: toTurnOutcome(state) };
   }
 
-  /** Visible history of a session: user messages and assistant text replies. */
+  /** Visible history of a session: messages and tool activity, in order. */
   async function getSession(sessionId: string) {
     if (!sessionIdSchema.safeParse(sessionId).success) {
       return fail("INVALID_INPUT", "Sessão inválida");
     }
     const state = await readState(sessionId);
-    const messages: HistoryMessage[] = (state.messages ?? []).flatMap(
-      (message): HistoryMessage[] => {
-        if (HumanMessage.isInstance(message))
-          return [{ role: "user", text: message.text }];
-        if (AIMessage.isInstance(message) && message.text) {
-          return [{ role: "assistant", text: message.text }];
-        }
-        return [];
-      },
-    );
-    return ok({ sessionId, messages, proposal: state.proposal ?? null });
+    const entries: HistoryEntry[] = [];
+    for (const message of state.messages ?? []) {
+      if (HumanMessage.isInstance(message)) {
+        entries.push({ type: "user", text: message.text });
+        continue;
+      }
+      if (AIMessage.isInstance(message) && message.text) {
+        entries.push({ type: "assistant", text: message.text });
+      }
+      for (const event of toolEvents([message])) {
+        if (event.type !== "tool_call" && event.type !== "tool_result")
+          continue;
+        const last = entries.at(-1);
+        if (last?.type === "activity") last.items.push(toActivityItem(event));
+        else entries.push({ type: "activity", items: [toActivityItem(event)] });
+      }
+    }
+    return ok({ sessionId, entries, proposal: state.proposal ?? null });
   }
 
   return {
