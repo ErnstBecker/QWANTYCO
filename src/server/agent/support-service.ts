@@ -5,6 +5,7 @@ import {
   type BaseMessage,
 } from "@langchain/core/messages";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   toActivityItem,
@@ -39,7 +40,14 @@ export type DecisionOutcome =
 type RunConfig = {
   configurable: { thread_id: string };
   recursionLimit: number;
+  /** Tracing: one root run per request, grouped by session in LangSmith. */
+  runId?: string;
+  runName?: string;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
 };
+
+export const ASSISTANT_NAME = "aurora-support";
 
 /** What the caller must run next: a graph input (invoke or stream) or a stored outcome. */
 export type PreparedTurn = { kind: "run"; input: unknown; config: RunConfig };
@@ -68,6 +76,18 @@ export function createSupportService(
   const configFor = (sessionId: string): RunConfig => ({
     configurable: { thread_id: sessionId },
     recursionLimit,
+  });
+
+  const runConfigFor = (
+    sessionId: string,
+    runName: string,
+    metadata: Record<string, unknown> = {},
+  ): RunConfig => ({
+    ...configFor(sessionId),
+    runId: randomUUID(),
+    runName,
+    tags: [ASSISTANT_NAME, runName],
+    metadata: { session_id: sessionId, assistant: ASSISTANT_NAME, ...metadata },
   });
 
   async function readState(sessionId: string) {
@@ -100,7 +120,7 @@ export function createSupportService(
         turn: { ...NEW_TURN },
         error: null,
       },
-      config: configFor(sessionId),
+      config: runConfigFor(sessionId, "message"),
     });
   }
 
@@ -120,7 +140,7 @@ export function createSupportService(
       return ok({
         kind: "run",
         input: new Command({ resume: parsed.data }),
-        config: configFor(sessionId),
+        config: runConfigFor(sessionId, "decision", { proposalId, decision }),
       });
     }
 

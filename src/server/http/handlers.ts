@@ -1,5 +1,10 @@
+import { traceable } from "langsmith/traceable";
 import type { ApiError, StreamEvent } from "@/lib/stream-events";
-import type { SupportService } from "../agent/support-service";
+import {
+  ASSISTANT_NAME,
+  type DecisionOutcome,
+  type SupportService,
+} from "../agent/support-service";
 import type { DomainError, ErrorCode } from "../shared/result";
 
 const STATUS: Partial<Record<ErrorCode, number>> = {
@@ -27,6 +32,7 @@ export function errorResponse(
 export function sseResponse(
   events: AsyncIterable<StreamEvent>,
   release: () => void,
+  runId?: string,
 ) {
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
@@ -61,6 +67,8 @@ export function sseResponse(
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      // Root run of this request in LangSmith, for correlating logs and traces.
+      ...(runId && { "X-Run-Id": runId }),
     },
   });
 }
@@ -96,7 +104,11 @@ export async function handleChat(request: Request, service: SupportService) {
     release();
     return prepared ? errorResponse(prepared.error) : invalidBody();
   }
-  return sseResponse(service.stream(prepared.data, request.signal), release);
+  return sseResponse(
+    service.stream(prepared.data, request.signal),
+    release,
+    prepared.data.config.runId,
+  );
 }
 
 export async function handleApproval(
@@ -119,7 +131,24 @@ export async function handleApproval(
     return prepared ? errorResponse(prepared.error) : invalidBody();
   }
   if (prepared.data.kind === "replay") {
-    const outcome = prepared.data.outcome;
+    // A repeated decision does not run the graph, but is still traced.
+    const outcome = await traceable(
+      async (replay: {
+        proposalId: unknown;
+        decision: unknown;
+        outcome: DecisionOutcome;
+      }) => replay.outcome,
+      {
+        name: "decision",
+        run_type: "chain",
+        tags: [ASSISTANT_NAME, "decision", "replay"],
+        metadata: { session_id: sessionId, assistant: ASSISTANT_NAME },
+      },
+    )({
+      proposalId: body.proposalId,
+      decision: body.decision,
+      outcome: prepared.data.outcome,
+    });
     return sseResponse(
       (async function* () {
         yield { type: "done", outcome } satisfies StreamEvent;
@@ -127,7 +156,11 @@ export async function handleApproval(
       release,
     );
   }
-  return sseResponse(service.stream(prepared.data, request.signal), release);
+  return sseResponse(
+    service.stream(prepared.data, request.signal),
+    release,
+    prepared.data.config.runId,
+  );
 }
 
 export async function handleGetSession(
