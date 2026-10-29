@@ -1,5 +1,6 @@
 import type { ToolCall } from "@langchain/core/messages/tool";
 import { ToolMessage } from "@langchain/core/messages";
+import { traceable } from "langsmith/traceable";
 import { randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DeadlineError, withDeadline } from "../shared/deadline";
@@ -66,10 +67,19 @@ async function runTool(
       };
     }
     try {
-      const result = await withDeadline(
-        () => tool.run(ctx.deps, input.data),
-        Math.min(toolTimeoutMs, remaining),
-      );
+      // Each attempt is its own span, so retries, timeouts and errors show in the trace.
+      const result = await traceable(
+        (args: typeof input.data) =>
+          withDeadline(
+            () => tool.run(ctx.deps, args),
+            Math.min(toolTimeoutMs, remaining),
+          ),
+        {
+          name: `${call.name} attempt`,
+          run_type: "chain",
+          metadata: { attempt },
+        },
+      )(input.data);
       if (!result.ok) return { result, attempts: attempt };
       const output = tool.outputSchema.safeParse(result.data);
       return {
@@ -110,10 +120,21 @@ export async function executeToolCalls(
   const startedAt = Date.now();
   for (const call of calls) {
     const elapsed = Date.now() - startedAt;
-    const { result, attempts } = await runTool(call, {
-      ...ctx,
-      remainingMs: (ctx.remainingMs ?? Infinity) - elapsed,
-    });
+    const { result, attempts } = await traceable(
+      (args: ToolCall["args"]) =>
+        runTool(
+          { ...call, args },
+          {
+            ...ctx,
+            remainingMs: (ctx.remainingMs ?? Infinity) - elapsed,
+          },
+        ),
+      {
+        name: call.name,
+        run_type: "tool",
+        metadata: { tool_call_id: call.id },
+      },
+    )(call.args);
     messages.push(
       new ToolMessage({
         tool_call_id: call.id ?? randomUUID(),

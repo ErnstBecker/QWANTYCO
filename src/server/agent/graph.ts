@@ -15,6 +15,7 @@ import {
   isCommand,
   type BaseCheckpointSaver,
 } from "@langchain/langgraph";
+import { traceable } from "langsmith/traceable";
 import { randomUUID } from "node:crypto";
 import { limitsSchema, type Limits } from "../config/env";
 import { withDeadline } from "../shared/deadline";
@@ -299,6 +300,11 @@ export function buildAgentGraph(options: AgentGraphOptions) {
         break;
       }
     }
+    // Marks the resume point in the trace with the human decision.
+    await traceable((d: Decision) => d, {
+      name: "human_decision",
+      run_type: "chain",
+    })(decision);
 
     if (decision.decision === "approve")
       return new Command({ goto: "register" });
@@ -332,11 +338,16 @@ export function buildAgentGraph(options: AgentGraphOptions) {
     const proposal = state.proposal!;
     const { chamadoId, resumo, justificativa } = proposal;
     // Executes exactly the proposal that was approved, keyed by its id.
-    let result = await registrarEscalonamento(
-      deps,
-      { chamadoId, resumo, justificativa },
-      proposal.id,
-    );
+    let result = await traceable(
+      (args: {
+        input: { chamadoId: string; resumo: string; justificativa: string };
+        idempotencyKey: string;
+      }) => registrarEscalonamento(deps, args.input, args.idempotencyKey),
+      { name: "registrar_escalonamento", run_type: "tool" },
+    )({
+      input: { chamadoId, resumo, justificativa },
+      idempotencyKey: proposal.id,
+    });
     if (
       result.ok &&
       !registrarEscalonamentoOutputSchema.safeParse(result.data).success
