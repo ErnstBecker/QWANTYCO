@@ -27,7 +27,7 @@ Goal: produce `.env.setup`, a draft built from `.env.example` with the user's ch
 ### 2. Model (one `AskUserQuestion` call)
 1. **Provider** — `ollama` (local, no key, data stays on the machine) / `openai` / `anthropic`.
 2. **Model** — options depend on the provider; it must support tool calling:
-   - ollama: `qwen2.5:7b-instruct` (recommended), `qwen3:8b`, `llama3.1:8b`
+   - ollama: `qwen3.5` (recommended; consistent tool calling), `qwen2.5:7b-instruct` (faster, less consistent on escalations)
    - anthropic: `claude-haiku-5-5` (recommended, cheap/fast), `claude-sonnet-5-5`
    - openai: ask for the model name ("Other"); remind the user to pick one with tool calling.
 
@@ -39,7 +39,7 @@ Goal: produce `.env.setup`, a draft built from `.env.example` with the user's ch
   - Check: `ollama --version`; `curl -s -m 3 <base_url>/api/tags`.
     - Server down → tell the user to run `! ollama serve &`.
     - Model missing from `/api/tags` → tell the user to run `! ollama pull <model>`.
-  - Hardware note: on CPU-only machines a 7–8B model takes 10–30s per answer.
+  - Hardware note: with a GPU expect a few seconds per turn (qwen3.5 thinks before answering); on CPU-only machines expect 10–30s or more.
 - **openai / anthropic**: the key stays empty; note which variable the user must fill.
 
 ### 4. LangSmith (one `AskUserQuestion` call)
