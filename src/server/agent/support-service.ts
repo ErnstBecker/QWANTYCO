@@ -1,7 +1,14 @@
-import { HumanMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  HumanMessage,
+  ToolMessage,
+  type BaseMessage,
+} from "@langchain/core/messages";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { z } from "zod";
+import type { HistoryMessage, StreamEvent } from "@/lib/stream-events";
 import { fail, ok, type Result } from "../shared/result";
+import { createSessionLock } from "../shared/session-lock";
 import type { Escalonamento } from "../tickets/schemas";
 import type { TicketDeps } from "../tickets/operations";
 import { endTurnWithError, type AgentGraph } from "./graph";
@@ -51,19 +58,8 @@ export function createSupportService(
   options: SupportServiceOptions = {},
 ) {
   const recursionLimit = options.recursionLimit ?? 15;
-  const locks = new Map<string, Promise<unknown>>();
-
   /** Serializes work per session so concurrent requests cannot interleave. */
-  async function withSessionLock<T>(sessionId: string, task: () => Promise<T>) {
-    const previous = locks.get(sessionId) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(task);
-    locks.set(sessionId, current);
-    try {
-      return await current;
-    } finally {
-      if (locks.get(sessionId) === current) locks.delete(sessionId);
-    }
-  }
+  const lock = createSessionLock();
 
   const configFor = (sessionId: string): RunConfig => ({
     configurable: { thread_id: sessionId },
@@ -193,9 +189,75 @@ export function createSupportService(
     return toTurnOutcome(state);
   }
 
+  /**
+   * Streams a prepared turn as UI events. Errors (including a client abort)
+   * end the turn through the same controlled recovery as invoke.
+   */
+  async function* stream(
+    prepared: PreparedTurn,
+    signal?: AbortSignal,
+  ): AsyncGenerator<StreamEvent> {
+    let state: AgentStateValue;
+    try {
+      const events = await graph.stream(prepared.input as never, {
+        ...prepared.config,
+        streamMode: ["updates", "messages"],
+        signal,
+      });
+      for await (const [mode, chunk] of events as AsyncIterable<
+        [string, unknown]
+      >) {
+        if (mode === "messages") {
+          const [message, meta] = chunk as [
+            BaseMessage,
+            { langgraph_node?: string },
+          ];
+          if (meta.langgraph_node === "agent" && message.text) {
+            yield { type: "token", text: message.text };
+          }
+          continue;
+        }
+        for (const [node, update] of Object.entries(
+          chunk as Record<string, unknown>,
+        )) {
+          if (node.startsWith("__")) continue;
+          yield { type: "step", node };
+          yield* toolEvents(
+            (update as { messages?: BaseMessage[] } | null)?.messages ?? [],
+          );
+        }
+      }
+      state = (await graph.getState(prepared.config)).values as AgentStateValue;
+    } catch (error) {
+      state = await recover(prepared.config, error);
+    }
+    yield { type: "done", outcome: toTurnOutcome(state) };
+  }
+
+  /** Visible history of a session: user messages and assistant text replies. */
+  async function getSession(sessionId: string) {
+    if (!sessionIdSchema.safeParse(sessionId).success) {
+      return fail("INVALID_INPUT", "Sessão inválida");
+    }
+    const state = await readState(sessionId);
+    const messages: HistoryMessage[] = (state.messages ?? []).flatMap(
+      (message): HistoryMessage[] => {
+        if (HumanMessage.isInstance(message))
+          return [{ role: "user", text: message.text }];
+        if (AIMessage.isInstance(message) && message.text) {
+          return [{ role: "assistant", text: message.text }];
+        }
+        return [];
+      },
+    );
+    return ok({ sessionId, messages, proposal: state.proposal ?? null });
+  }
+
   return {
-    withSessionLock,
+    lock,
     recover,
+    stream,
+    getSession,
     prepareMessage,
     prepareDecision,
 
@@ -203,7 +265,7 @@ export function createSupportService(
       sessionId: string,
       text: unknown,
     ): Promise<Result<TurnOutcome>> {
-      return withSessionLock(sessionId, async () => {
+      return lock.run(sessionId, async () => {
         const prepared = await prepareMessage(sessionId, text);
         if (!prepared.ok) return prepared;
         return ok(await run(prepared.data));
@@ -211,7 +273,7 @@ export function createSupportService(
     },
 
     decide(sessionId: string, body: unknown): Promise<Result<DecisionOutcome>> {
-      return withSessionLock(sessionId, async () => {
+      return lock.run(sessionId, async () => {
         const prepared = await prepareDecision(sessionId, body);
         if (!prepared.ok) return prepared;
         if (prepared.data.kind === "replay") return ok(prepared.data.outcome);
@@ -222,3 +284,32 @@ export function createSupportService(
 }
 
 export type SupportService = ReturnType<typeof createSupportService>;
+
+function* toolEvents(messages: BaseMessage[]): Generator<StreamEvent> {
+  for (const message of messages) {
+    if (AIMessage.isInstance(message)) {
+      for (const call of message.tool_calls ?? []) {
+        yield {
+          type: "tool_call",
+          id: call.id!,
+          name: call.name,
+          args: call.args,
+        };
+      }
+    } else if (ToolMessage.isInstance(message)) {
+      const body = JSON.parse(message.text) as {
+        ok: boolean;
+        error?: TurnError;
+      };
+      yield {
+        type: "tool_result",
+        id: message.tool_call_id,
+        name: message.name ?? "",
+        status: message.status === "error" ? "error" : "success",
+        attempts: (message.artifact as { attempts?: number } | undefined)
+          ?.attempts,
+        error: body.ok ? undefined : body.error,
+      };
+    }
+  }
+}
