@@ -2,6 +2,8 @@
 
 Assistente que consulta chamados de suporte e prepara escalonamentos para revisão humana. O modelo decide quais ferramentas usar; o backend valida, executa, aplica as regras de negócio e só registra um escalonamento depois de uma aprovação explícita.
 
+Inclui também o bônus: um assistente de **viagens** que responde por RAG sobre uma base simulada, rodando no **mesmo grafo** com outra configuração (veja [Assistentes](#assistentes-bônus)).
+
 **Stack:** TypeScript · Next.js 16 (App Router) · LangGraph · LangSmith · Zod · Vitest
 
 ## Início rápido
@@ -36,6 +38,7 @@ A skill nunca lê nem escreve o `.env`: só o rascunho. Sem o Claude Code, use o
 - [Testes offline](#testes-offline)
 - [Avaliação no LangSmith](#avaliação-no-langsmith)
 - [Fluxo](#fluxo)
+- [Assistentes (bônus)](#assistentes-bônus)
 - [Arquitetura](#arquitetura)
 - [Decisões](#decisões)
 - [Observabilidade](#observabilidade)
@@ -172,6 +175,7 @@ Erros: `400` entrada inválida · `404` proposta inexistente · `409` aprovaçã
 ```bash
 pnpm test             # todos os testes (offline, modelo fake)
 pnpm test:scenarios   # cenários de aceitação do desafio, com saída detalhada
+pnpm test:assistants  # separação entre os assistentes (bônus), com saída detalhada
 pnpm typecheck
 pnpm lint
 ```
@@ -189,6 +193,8 @@ Os testes usam um modelo roteirizado (`src/server/testing/scripted-model.ts`) qu
 | Falha transitória | recupera dentro do limite; esgota as tentativas com erro controlado |
 | Saída inválida e limites | ferramenta desconhecida, argumentos e saídas inválidos, limite de passos e de tempo |
 | Contexto e sessões | a sessão lembra o turno anterior; outra sessão não vê nada dele |
+
+`src/server/assistants.test.ts` cobre o bônus pelo mesmo caminho: recuperação com fonte, pergunta sem evidência, viagens tentando usar ferramentas de chamados (e propor escalonamento), suporte tentando usar o RAG e histórico separado por assistente na mesma sessão.
 
 ## Avaliação no LangSmith
 
@@ -251,6 +257,23 @@ flowchart LR
 4. **approval** pausa o grafo com `interrupt`. A decisão do usuário retoma o mesmo thread com `Command({ resume })` e só vale para o `proposalId` exibido.
 5. **register** grava exatamente a proposta aprovada, rechecando a situação do chamado, com o `proposalId` como chave de idempotência. A mensagem final vem do resultado real da gravação, não do modelo.
 
+## Assistentes (bônus)
+
+Um único grafo compilado atende dois assistentes. O assistente é escolhido a cada execução por `configurable.assistant_id`; nada além da configuração muda (`src/server/agent/assistants.ts`):
+
+| Assistente | System prompt | Ferramentas |
+|---|---|---|
+| `support` | especialista em chamados | `listar_chamados`, `consultar_chamado`, `propor_escalonamento` (com aprovação) |
+| `travel` | especialista em documentação de viagem | `call_rag` |
+
+- **Restrição no backend.** O nó `agent` liga ao modelo só as ferramentas do assistente, e o `executor` usa a mesma lista como allowlist. Se o modelo pedir uma ferramenta de outro assistente, ela não executa e volta `UNKNOWN_TOOL`. Sem escalonamento habilitado, `propor_escalonamento` também é recusada, então o fluxo de aprovação nunca é alcançado por viagens.
+- **Histórico separado.** O `thread_id` é `<assistente>:<sessão>`, então o mesmo `sessionId` nunca compartilha contexto entre assistentes. Na interface, cada assistente tem a sua lista de sessões.
+- **Base de conhecimento.** `src/server/mocks/viagens.ts` tem documentos **fictícios**, marcados como simulação, sobre França, Japão, Alemanha, Portugal, Estados Unidos e Canadá, para passaportes brasileiro e português. Cada um diz a que nacionalidade, finalidade e duração se aplica.
+- **Recuperação.** `call_rag` (`src/server/travel/rag.ts`) recebe a pergunta e os filtros que o usuário informou. O destino é obrigatório; nacionalidade, finalidade e duração filtram quando informados. Os documentos que passam nos filtros são ordenados por sobreposição de termos com a pergunta (sem acento e sem stopwords) e voltam como trechos com `fonte` e `aplicaSe`. Não há banco vetorial: com uma base pequena e metadados explícitos, o filtro decide a evidência e a ordenação só prioriza.
+- **Sem evidência, sem resposta inventada.** Destino ou perfil fora da base retorna lista vazia, e o prompt manda dizer que a base não contém a informação. Se faltar o perfil (nacionalidade, finalidade ou duração), o assistente pede esse dado ou resume as opções, cada uma com sua fonte.
+
+Para experimentar, escolha **Viagens** na barra lateral e pergunte, por exemplo, "Qual documentação preciso para viajar para a França?". Na API, envie `assistantId: "travel"` em `POST /api/chat` e `?assistant=travel` em `/api/sessions/:id`; sem o campo, vale `support`.
+
 ## Arquitetura
 
 Monólito Next.js em camadas. As rotas da API só repassam; a lógica fica em `src/server`.
@@ -264,7 +287,8 @@ src/
    ├─ http/              handlers: validação do corpo, lock por sessão, SSE, status HTTP
    ├─ agent/             grafo LangGraph, executor, serviço de sessão
    ├─ tickets/           domínio: schemas, operações e contratos dos stores
-   ├─ mocks/             chamados fictícios, stores em memória e falhas simuladas
+   ├─ travel/            domínio de viagens: schemas e recuperação (RAG)
+   ├─ mocks/             chamados e documentos de viagem fictícios, stores em memória e falhas simuladas
    ├─ model/             fábrica do modelo por provedor
    ├─ config/            leitura e validação do ambiente
    ├─ shared/            Result, deadline, lock por sessão
@@ -279,7 +303,8 @@ src/
 - **Regras no backend, não no prompt.** "Só chamados abertos" é verificado na proposta e de novo no registro. Ferramentas desconhecidas, argumentos inválidos e saídas fora do contrato são rejeitados pelo executor.
 - **Aprovação vinculada e idempotente.** A decisão carrega o `proposalId`. Repetir a mesma decisão devolve o resultado anterior sem rodar o grafo; decisões divergentes ou para outra proposta retornam `409`. A gravação é atômica por chave de idempotência, o que cobre aprovações simultâneas.
 - **Orçamento por turno.** Cada nó soma seu tempo de execução e um passo ao turno. A espera humana fica fora, porque o `interrupt` interrompe o nó antes da soma. Ao estourar o tempo ou os passos, o turno termina com uma mensagem controlada e as chamadas pendentes são fechadas.
-- **Sessão = thread.** O `sessionId` é o `thread_id` do checkpointer. Um lock por sessão serializa as requisições (por exemplo, duas abas).
+- **Sessão = thread.** O `thread_id` do checkpointer é `<assistente>:<sessionId>`. Um lock por sessão serializa as requisições (por exemplo, duas abas).
+- **Assistentes como configuração.** Suporte e viagens são o mesmo grafo com outro prompt e outra allowlist, escolhidos por execução, e não grafos separados.
 - **Respostas determinísticas para a escrita.** As mensagens de registro e de rejeição são geradas pelo backend a partir do resultado real.
 - **Streaming via SSE.** Tokens e atividade de ferramentas chegam em tempo real; o histórico com a atividade também pode ser recarregado pela API.
 - **Modelo plugável.** Ollama, OpenAI ou Anthropic pelo `.env`, com `temperature: 0`.
@@ -289,7 +314,7 @@ src/
 
 Com `LANGSMITH_TRACING=true`, cada requisição gera um trace no projeto `LANGSMITH_PROJECT`:
 
-- **Raiz** `message` ou `decision`, com metadata `session_id`, `assistant` e, na decisão, `proposalId` e `decision`. A aba **Threads** agrupa a conversa inteira pela sessão.
+- **Raiz** `message` ou `decision`, com metadata `session_id`, `assistant` (`support` ou `travel`) e, na decisão, `proposalId` e `decision`. O assistente também vai como tag, para filtrar. A aba **Threads** agrupa a conversa inteira pela sessão.
 - **Nós do grafo** e **chamadas ao modelo** (traçados pelo LangGraph/LangChain).
 - **Ferramentas** como spans `tool`, com argumentos e resultado; dentro deles, **cada tentativa** com seu erro (falha transitória, timeout).
 - **Aprovação:** a pausa aparece no nó `approval` do trace da mensagem; a retomada fica no trace `decision`, com o span `human_decision` e o `registrar_escalonamento` com a chave de idempotência.
