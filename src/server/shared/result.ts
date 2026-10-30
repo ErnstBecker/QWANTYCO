@@ -1,3 +1,5 @@
+import type { z } from "zod";
+
 export type ErrorCode =
   | "INVALID_INPUT"
   | "NOT_FOUND"
@@ -31,3 +33,16 @@ export const fail = <T = never>(
   ok: false,
   error: { code, message },
 });
+
+/** Parses a tool input, turning schema issues into a readable INVALID_INPUT. */
+export function parseInput<S extends z.ZodType>(
+  schema: S,
+  input: unknown,
+): Result<z.infer<S>> {
+  const parsed = schema.safeParse(input);
+  if (parsed.success) return ok(parsed.data);
+  const detail = parsed.error.issues
+    .map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`)
+    .join("; ");
+  return fail("INVALID_INPUT", `Entrada inválida (${detail})`);
+}

@@ -1,5 +1,4 @@
-import type { z } from "zod";
-import { fail, ok, type Result } from "../shared/result";
+import { fail, ok, parseInput, type Result } from "../shared/result";
 import {
   consultarChamadoInputSchema,
   listarChamadosInputSchema,
@@ -17,18 +16,6 @@ export type TicketDeps = {
   escalations: EscalationStore;
   now?: () => Date;
 };
-
-function parseInput<S extends z.ZodType>(
-  schema: S,
-  input: unknown,
-): Result<z.infer<S>> {
-  const parsed = schema.safeParse(input);
-  if (parsed.success) return ok(parsed.data);
-  const detail = parsed.error.issues
-    .map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`)
-    .join("; ");
-  return fail("INVALID_INPUT", `Entrada inválida (${detail})`);
-}
 
 export function canEscalate(chamado: Chamado): boolean {
   return chamado.situacao === "aberto";
