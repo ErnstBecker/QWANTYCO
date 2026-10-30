@@ -14,11 +14,8 @@ import {
   toolCall,
   type ScriptStep,
 } from "../testing/scripted-model";
-import {
-  createEscalationStore,
-  createTicketRepository,
-} from "../tickets/store";
-import { parseFaultPlan, withFaults, type FaultPlan } from "./faults";
+import { createEscalationStore, createTicketRepository } from "../mocks/stores";
+import { parseFaultPlan, withFaults, type FaultPlan } from "../mocks/faults";
 import { buildAgentGraph } from "./graph";
 import { createSupportService } from "./support-service";
 import { READ_TOOLS } from "./tools";

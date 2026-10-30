@@ -8,10 +8,7 @@ import {
   toolCall,
   type ScriptStep,
 } from "../testing/scripted-model";
-import {
-  createEscalationStore,
-  createTicketRepository,
-} from "../tickets/store";
+import { createEscalationStore, createTicketRepository } from "../mocks/stores";
 import { buildAgentGraph } from "./graph";
 import type { Proposal } from "./proposal";
 import { createSupportService } from "./support-service";

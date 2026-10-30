@@ -118,7 +118,7 @@ pnpm dev                   # http://localhost:3000
 
 ### Experimentando
 
-Os dados são fictícios e ficam em memória (`src/server/tickets/data.ts`):
+Os dados são fictícios e ficam em memória (`src/server/mocks/chamados.ts`):
 
 | ID | Título | Situação |
 |---|---|---|
@@ -262,8 +262,9 @@ src/
 ├─ lib/                  tipos dos eventos SSE e cliente da API (compartilhados)
 └─ server/
    ├─ http/              handlers: validação do corpo, lock por sessão, SSE, status HTTP
-   ├─ agent/             grafo LangGraph, executor, serviço de sessão, falhas simuladas
-   ├─ tickets/           domínio: dados, schemas, operações, store de escalonamentos
+   ├─ agent/             grafo LangGraph, executor, serviço de sessão
+   ├─ tickets/           domínio: schemas, operações e contratos dos stores
+   ├─ mocks/             chamados fictícios, stores em memória e falhas simuladas
    ├─ model/             fábrica do modelo por provedor
    ├─ config/            leitura e validação do ambiente
    ├─ shared/            Result, deadline, lock por sessão

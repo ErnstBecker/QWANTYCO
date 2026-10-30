@@ -6,8 +6,15 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { DeadlineError, withDeadline } from "../shared/deadline";
 import { fail, ok, type Result } from "../shared/result";
 import type { TicketDeps } from "../tickets/operations";
-import { TransientToolError } from "./faults";
 import type { AgentTool } from "./tools";
+
+/** Retryable failure, e.g. a dependency that is briefly unavailable. */
+export class TransientToolError extends Error {
+  constructor(message = "Falha transitória simulada") {
+    super(message);
+    this.name = "TransientToolError";
+  }
+}
 
 export type ToolLimits = {
   toolTimeoutMs: number;

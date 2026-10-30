@@ -1,6 +1,6 @@
 import { MemorySaver } from "@langchain/langgraph";
 import { buildAgentGraph } from "./agent/graph";
-import { parseFaultPlan, withFaults } from "./agent/faults";
+import { parseFaultPlan, withFaults } from "./mocks/faults";
 import {
   createSupportService,
   type SupportService,
@@ -8,7 +8,7 @@ import {
 import { READ_TOOLS } from "./agent/tools";
 import { loadLimits, loadModelConfig } from "./config/env";
 import { createChatModel } from "./model/factory";
-import { createEscalationStore, createTicketRepository } from "./tickets/store";
+import { createEscalationStore, createTicketRepository } from "./mocks/stores";
 
 export type Runtime = {
   service: SupportService;

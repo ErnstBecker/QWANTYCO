@@ -1,14 +1,7 @@
 import { z } from "zod";
+import { TransientToolError } from "../agent/executor";
+import type { AgentTool } from "../agent/tools";
 import { ok } from "../shared/result";
-import type { AgentTool } from "./tools";
-
-/** Retryable failure, e.g. a dependency that is briefly unavailable. */
-export class TransientToolError extends Error {
-  constructor(message = "Falha transitória simulada") {
-    super(message);
-    this.name = "TransientToolError";
-  }
-}
 
 export const faultSchema = z.enum([
   "transient", // throws a retryable error

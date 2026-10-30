@@ -6,10 +6,7 @@ import { buildAgentGraph } from "../agent/graph";
 import type { AgentStateValue } from "../agent/state";
 import { createSupportService, toTurnOutcome } from "../agent/support-service";
 import { listarChamados } from "../tickets/operations";
-import {
-  createEscalationStore,
-  createTicketRepository,
-} from "../tickets/store";
+import { createEscalationStore, createTicketRepository } from "../mocks/stores";
 import type { EvalInputs } from "./dataset";
 import { toolSteps, type AgentRunOutput } from "./trajectory";
 

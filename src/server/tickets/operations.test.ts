@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { CHAMADOS_SEED } from "./data";
+import { CHAMADOS_SEED } from "../mocks/chamados";
 import {
   consultarChamado,
   listarChamados,
@@ -7,7 +7,7 @@ import {
   type TicketDeps,
 } from "./operations";
 import { chamadoSchema } from "./schemas";
-import { createEscalationStore, createTicketRepository } from "./store";
+import { createEscalationStore, createTicketRepository } from "../mocks/stores";
 
 const FIXED_NOW = new Date("2026-10-28T12:00:00.000Z");
 

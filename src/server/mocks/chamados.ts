@@ -1,4 +1,4 @@
-import type { Chamado } from "./schemas";
+import type { Chamado } from "../tickets/schemas";
 
 // Fictitious data for the Aurora exercise. CH-101 and CH-103 are the only open tickets.
 export const CHAMADOS_SEED: readonly Chamado[] = [

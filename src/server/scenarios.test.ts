@@ -21,7 +21,7 @@ import {
   toolResults,
 } from "./testing/http";
 import type { TicketRepository } from "./tickets/store";
-import { createTicketRepository } from "./tickets/store";
+import { createTicketRepository } from "./mocks/stores";
 
 type Harness = ReturnType<typeof createHarness>;
 
