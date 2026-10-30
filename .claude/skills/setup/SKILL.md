@@ -27,7 +27,7 @@ Goal: produce `.env.setup`, a draft built from `.env.example` with the user's ch
 ### 2. Model (one `AskUserQuestion` call)
 1. **Provider** — `ollama` (local, no key, data stays on the machine) / `openai` / `anthropic`.
 2. **Model** — options depend on the provider; it must support tool calling:
-   - ollama: `qwen3.5` (recommended; consistent tool calling), `qwen2.5:7b-instruct` (faster, less consistent on escalations)
+   - ollama: `qwen3.5:latest` (recommended; consistent tool calling), `qwen2.5:7b-instruct` (faster, less consistent on escalations)
    - anthropic: `claude-haiku-5-5` (recommended, cheap/fast), `claude-sonnet-5-5`
    - openai: ask for the model name ("Other"); remind the user to pick one with tool calling.
 
