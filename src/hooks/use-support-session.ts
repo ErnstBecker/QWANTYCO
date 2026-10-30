@@ -5,6 +5,7 @@ import { ApiRequestError, api } from "@/lib/api-client";
 import {
   toActivityItem,
   type ActivityItem,
+  type AssistantId,
   type ProposalView,
   type StreamEvent,
 } from "@/lib/stream-events";
@@ -80,7 +81,7 @@ export function applyEvent(entries: Entry[], event: StreamEvent): Entry[] {
   }
 }
 
-export function useSupportSession(sessionId: string) {
+export function useSupportSession(sessionId: string, assistantId: AssistantId) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [proposal, setProposal] = useState<ProposalView | null>(null);
   const [status, setStatus] = useState<Status>("loading");
@@ -93,7 +94,7 @@ export function useSupportSession(sessionId: string) {
     abortRef.current = controller;
 
     api
-      .getSession(sessionId)
+      .getSession(sessionId, assistantId)
       .then((view) => {
         if (controller.signal.aborted) return;
         setEntries(view.entries);
@@ -108,7 +109,7 @@ export function useSupportSession(sessionId: string) {
       });
 
     return () => controller.abort();
-  }, [sessionId]);
+  }, [sessionId, assistantId]);
 
   const consume = useCallback(
     async (
@@ -146,9 +147,11 @@ export function useSupportSession(sessionId: string) {
   const send = useCallback(
     (text: string) => {
       setEntries((current) => [...current, { type: "user", text }]);
-      return consume((signal) => api.sendMessage(sessionId, text, signal));
+      return consume((signal) =>
+        api.sendMessage(sessionId, assistantId, text, signal),
+      );
     },
-    [consume, sessionId],
+    [consume, sessionId, assistantId],
   );
 
   const decide = useCallback(
@@ -157,6 +160,7 @@ export function useSupportSession(sessionId: string) {
       return consume(async (signal) => {
         const events = await api.decide(
           sessionId,
+          assistantId,
           proposal.id,
           decision,
           signal,
@@ -172,7 +176,7 @@ export function useSupportSession(sessionId: string) {
         return events;
       });
     },
-    [consume, proposal, sessionId],
+    [consume, proposal, sessionId, assistantId],
   );
 
   return { entries, proposal, status, banner, send, decide };

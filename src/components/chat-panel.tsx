@@ -2,15 +2,28 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useSupportSession, type Entry } from "@/hooks/use-support-session";
+import type { AssistantId } from "@/lib/stream-events";
 import { ActivityLog } from "./activity-log";
 import { Markdown } from "./markdown";
 import { ProposalCard } from "./proposal-card";
 
-const SUGGESTIONS = [
-  "Liste todos os chamados abertos.",
-  "Consulte o CH-101 e prepare um escalonamento se ele estiver aberto.",
-  "Escalone o CH-102.",
-];
+const SUGGESTIONS: Record<AssistantId, string[]> = {
+  support: [
+    "Liste todos os chamados abertos.",
+    "Consulte o CH-101 e prepare um escalonamento se ele estiver aberto.",
+    "Escalone o CH-102.",
+  ],
+  travel: [
+    "Qual documentação preciso para viajar para a França?",
+    "Sou brasileiro e vou ao Japão a turismo por 15 dias. Preciso de visto?",
+    "Preciso de visto para a Austrália?",
+  ],
+};
+
+const PLACEHOLDER: Record<AssistantId, string> = {
+  support: "Pergunte sobre os chamados…",
+  travel: "Pergunte sobre documentação de viagem…",
+};
 
 function EntryView({ entry }: { entry: Entry }) {
   switch (entry.type) {
@@ -45,13 +58,17 @@ function EntryView({ entry }: { entry: Entry }) {
 
 export function ChatPanel({
   sessionId,
+  assistantId,
   onFirstMessage,
 }: {
   sessionId: string;
+  assistantId: AssistantId;
   onFirstMessage: (text: string) => void;
 }) {
-  const { entries, proposal, status, banner, send, decide } =
-    useSupportSession(sessionId);
+  const { entries, proposal, status, banner, send, decide } = useSupportSession(
+    sessionId,
+    assistantId,
+  );
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -93,7 +110,7 @@ export function ChatPanel({
         ) : entries.length === 0 ? (
           <div className="space-y-2">
             <p className="text-sm text-zinc-500">Experimente:</p>
-            {SUGGESTIONS.map((suggestion) => (
+            {SUGGESTIONS[assistantId].map((suggestion) => (
               <button
                 key={suggestion}
                 type="button"
@@ -146,7 +163,7 @@ export function ChatPanel({
           placeholder={
             proposal
               ? "Decida sobre a proposta antes de continuar"
-              : "Pergunte sobre os chamados…"
+              : PLACEHOLDER[assistantId]
           }
           className="flex-1 rounded-md border border-zinc-300 bg-transparent px-3 py-2 text-sm disabled:opacity-60 dark:border-zinc-700"
         />
