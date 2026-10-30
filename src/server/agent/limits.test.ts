@@ -17,8 +17,8 @@ import {
 import { createEscalationStore, createTicketRepository } from "../mocks/stores";
 import { parseFaultPlan, withFaults, type FaultPlan } from "../mocks/faults";
 import { buildAgentGraph } from "./graph";
+import { ASSISTANTS, mapAssistantTools, threadIdFor } from "./assistants";
 import { createSupportService } from "./support-service";
-import { READ_TOOLS } from "./tools";
 
 const FAST: Partial<Limits> = {
   toolTimeoutMs: 50,
@@ -50,14 +50,18 @@ function setup(
     model: new ScriptedChatModel(steps),
     deps,
     checkpointer: new MemorySaver(),
-    tools: withFaults(READ_TOOLS, faults),
+    assistants: mapAssistantTools(ASSISTANTS, (tools) =>
+      withFaults(tools, faults),
+    ),
     limits: mergedLimits,
   });
   const service = createSupportService(graph, deps, {
     recursionLimit: serviceRecursionLimit ?? mergedLimits.recursionLimit,
   });
   const sessionId = randomUUID();
-  const config = { configurable: { thread_id: sessionId } };
+  const config = {
+    configurable: { thread_id: threadIdFor("support", sessionId) },
+  };
   const messages = async () =>
     ((await graph.getState(config)).values.messages ?? []) as BaseMessage[];
   return { deps, graph, service, sessionId, messages };

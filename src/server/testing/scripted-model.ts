@@ -14,6 +14,8 @@ export type ScriptStep =
  */
 export class ScriptedChatModel extends BaseChatModel {
   readonly calls: BaseMessage[][] = [];
+  /** Names of the tools bound when each call was made. */
+  readonly toolsPerCall: string[][] = [];
   boundTools: BindToolsInput[] = [];
   private index = 0;
 
@@ -37,6 +39,11 @@ export class ScriptedChatModel extends BaseChatModel {
     }
     this.index += 1;
     this.calls.push(messages);
+    this.toolsPerCall.push(
+      this.boundTools.map(
+        (tool) => (tool as { function: { name: string } }).function.name,
+      ),
+    );
     const message = typeof step === "function" ? await step(messages) : step;
     return { generations: [{ message, text: message.text }] };
   }

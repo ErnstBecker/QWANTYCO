@@ -13,6 +13,8 @@ import {
   listarChamadosOutputSchema,
   registrarEscalonamentoInputSchema,
 } from "../tickets/schemas";
+import { callRag, type TravelRetriever } from "../travel/rag";
+import { callRagInputSchema, callRagOutputSchema } from "../travel/schemas";
 
 export type AgentTool = {
   name: string;
@@ -44,6 +46,18 @@ export const READ_TOOLS: readonly AgentTool[] = [
   listarChamadosTool,
   consultarChamadoTool,
 ];
+
+/** Retrieval over the travel knowledge base; it reads no ticket data. */
+export function createCallRagTool(retriever: TravelRetriever): AgentTool {
+  return {
+    name: "call_rag",
+    description:
+      "Busca trechos na base de documentação de viagens (simulada). Informe a pergunta e o destino; nacionalidade, finalidade e duração só se o usuário informou. Retorna trechos com a fonte a citar.",
+    inputSchema: callRagInputSchema,
+    outputSchema: callRagOutputSchema,
+    run: (_deps, input) => callRag(retriever, input),
+  };
+}
 
 /**
  * Bound to the model but never run by the executor: the graph turns the call

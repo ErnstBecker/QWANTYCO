@@ -14,6 +14,7 @@ import {
   interrupt,
   isCommand,
   type BaseCheckpointSaver,
+  type LangGraphRunnableConfig,
 } from "@langchain/langgraph";
 import { traceable } from "langsmith/traceable";
 import { randomUUID } from "node:crypto";
@@ -29,6 +30,7 @@ import {
   registrarEscalonamentoInputSchema,
   registrarEscalonamentoOutputSchema,
 } from "../tickets/schemas";
+import { ASSISTANTS, assistantFor, type Assistants } from "./assistants";
 import { executeToolCalls } from "./executor";
 import {
   decisionSchema,
@@ -36,27 +38,19 @@ import {
   type Decision,
   type Proposal,
 } from "./proposal";
-import { SUPPORT_SYSTEM_PROMPT } from "./prompt";
 import {
   AgentState,
   type AgentStateUpdate,
   type AgentStateValue,
 } from "./state";
-import {
-  READ_TOOLS,
-  registrarEscalonamentoTool,
-  toToolDefinition,
-  type AgentTool,
-  type ApprovalTool,
-} from "./tools";
+import { registrarEscalonamentoTool, toToolDefinition } from "./tools";
 
 export type AgentGraphOptions = {
   model: BaseChatModel;
   deps: TicketDeps;
   checkpointer: BaseCheckpointSaver;
-  tools?: readonly AgentTool[];
-  approvalTool?: ApprovalTool;
-  systemPrompt?: string;
+  /** Configurations selectable per run through `configurable.assistant_id`. */
+  assistants?: Assistants;
   limits?: Partial<Limits>;
 };
 
@@ -117,18 +111,14 @@ export function endTurnWithError(
 }
 
 export function buildAgentGraph(options: AgentGraphOptions) {
-  const tools = options.tools ?? READ_TOOLS;
-  const approvalTool = options.approvalTool ?? registrarEscalonamentoTool;
-  const systemPrompt = options.systemPrompt ?? SUPPORT_SYSTEM_PROMPT;
+  const assistants = options.assistants ?? ASSISTANTS;
+  const approvalTool = registrarEscalonamentoTool;
   const limits = limitsSchema.parse(options.limits ?? {});
   const { deps } = options;
 
   if (!options.model.bindTools) {
     throw new Error("The configured model does not support tool calling");
   }
-  const model = options.model.bindTools(
-    [...tools, approvalTool].map(toToolDefinition),
-  );
 
   const remainingMs = (state: AgentStateValue) =>
     limits.activeBudgetMs - state.turn.activeMs;
@@ -158,10 +148,15 @@ export function buildAgentGraph(options: AgentGraphOptions) {
    * interrupt throws before returning, so human review time is never counted.
    */
   const tracked =
-    (node: (state: AgentStateValue) => Promise<AgentStateUpdate | Command>) =>
-    async (state: AgentStateValue) => {
+    (
+      node: (
+        state: AgentStateValue,
+        config: LangGraphRunnableConfig,
+      ) => Promise<AgentStateUpdate | Command>,
+    ) =>
+    async (state: AgentStateValue, config: LangGraphRunnableConfig) => {
       const startedAt = performance.now();
-      const out = await node(state);
+      const out = await node(state, config);
       const turn = {
         activeMs: state.turn.activeMs + (performance.now() - startedAt),
         steps: state.turn.steps + 1,
@@ -180,17 +175,28 @@ export function buildAgentGraph(options: AgentGraphOptions) {
       (call) => call.name === approvalTool.name,
     );
 
-  const agent = async (state: AgentStateValue): Promise<AgentStateUpdate> => {
+  const agent = async (
+    state: AgentStateValue,
+    config: LangGraphRunnableConfig,
+  ): Promise<AgentStateUpdate> => {
     const exceeded = budgetExceeded(state);
     if (exceeded) return exceeded;
 
+    // The model only sees the tools of the assistant selected for this run.
+    const assistant = assistantFor(assistants, config);
+    const model = options.model.bindTools!(
+      [...assistant.tools, ...(assistant.escalation ? [approvalTool] : [])].map(
+        toToolDefinition,
+      ),
+    );
     let response: AIMessage;
     try {
       response = await withDeadline(
         (signal) =>
-          model.invoke([new SystemMessage(systemPrompt), ...state.messages], {
-            signal,
-          }),
+          model.invoke(
+            [new SystemMessage(assistant.systemPrompt), ...state.messages],
+            { signal },
+          ),
         Math.min(limits.modelTimeoutMs, remainingMs(state)),
       );
     } catch {
@@ -214,16 +220,22 @@ export function buildAgentGraph(options: AgentGraphOptions) {
 
   const executor = async (
     state: AgentStateValue,
+    config: LangGraphRunnableConfig,
   ): Promise<AgentStateUpdate> => {
     const exceeded = budgetExceeded(state);
     if (exceeded) return exceeded;
 
+    // Backend allowlist: whatever the model asks for, only this assistant's
+    // tools run. Without escalation, a proposal call is refused as unknown.
+    const assistant = assistantFor(assistants, config);
+    const isApproval = (call: ToolCall) =>
+      assistant.escalation && call.name === approvalTool.name;
     const calls = lastAIMessage(state.messages)?.tool_calls ?? [];
-    const approvalCalls = calls.filter((c) => c.name === approvalTool.name);
-    const regular = calls.filter((c) => c.name !== approvalTool.name);
+    const approvalCalls = calls.filter(isApproval);
+    const regular = calls.filter((c) => !isApproval(c));
 
     const messages = await executeToolCalls(regular, {
-      tools,
+      tools: assistant.tools,
       deps,
       limits,
       remainingMs: remainingMs(state),

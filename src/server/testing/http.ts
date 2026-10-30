@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import type { Outcome, StreamEvent } from "@/lib/stream-events";
 import type { Limits } from "../config/env";
 import { withFaults, type FaultPlan } from "../mocks/faults";
+import { ASSISTANTS, mapAssistantTools } from "../agent/assistants";
 import { buildAgentGraph } from "../agent/graph";
 import { createSupportService } from "../agent/support-service";
-import { READ_TOOLS } from "../agent/tools";
 import type { TicketDeps } from "../tickets/operations";
 import { createEscalationStore, createTicketRepository } from "../mocks/stores";
 import { ScriptedChatModel, type ScriptStep } from "./scripted-model";
@@ -30,7 +30,9 @@ export function createHarness(
     model,
     deps,
     checkpointer: new MemorySaver(),
-    tools: withFaults(READ_TOOLS, options.faults ?? {}),
+    assistants: mapAssistantTools(ASSISTANTS, (tools) =>
+      withFaults(tools, options.faults ?? {}),
+    ),
     limits: options.limits,
   });
   const service = createSupportService(graph, deps, {

@@ -9,6 +9,7 @@ import {
   type ScriptStep,
 } from "../testing/scripted-model";
 import { createEscalationStore, createTicketRepository } from "../mocks/stores";
+import { threadIdFor } from "./assistants";
 import { buildAgentGraph } from "./graph";
 import type { Proposal } from "./proposal";
 import { createSupportService } from "./support-service";
@@ -177,7 +178,9 @@ describe("escalation approval", () => {
   it("the graph ignores a resume for another proposal even without the service", async () => {
     const ctx = setup(escalationScript());
     const proposal = await proposeEscalation(ctx);
-    const config = { configurable: { thread_id: ctx.sessionId } };
+    const config = {
+      configurable: { thread_id: threadIdFor("support", ctx.sessionId) },
+    };
 
     const state = await ctx.graph.invoke(
       new Command({

@@ -68,12 +68,10 @@ describe("agent graph", () => {
     expect(model.calls[1]?.some(ToolMessage.isInstance)).toBe(true);
   });
 
-  it("binds only the allowed tools to the model", () => {
-    const { model } = setup([]);
-    const names = model.boundTools.map(
-      (tool) => (tool as { function: { name: string } }).function.name,
-    );
-    expect(names).toEqual([
+  it("binds only the allowed tools to the model", async () => {
+    const { model, ask } = setup([reply("Olá")]);
+    await ask("Oi");
+    expect(model.toolsPerCall[0]).toEqual([
       "listar_chamados",
       "consultar_chamado",
       "propor_escalonamento",

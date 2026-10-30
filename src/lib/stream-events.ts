@@ -73,8 +73,11 @@ export type HistoryEntry =
   | { type: "assistant"; text: string }
   | { type: "activity"; items: ActivityItem[] };
 
+export type AssistantId = "support" | "travel";
+
 export type SessionView = {
   sessionId: string;
+  assistantId: AssistantId;
   entries: HistoryEntry[];
   proposal: ProposalView | null;
 };

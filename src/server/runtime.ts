@@ -1,11 +1,11 @@
 import { MemorySaver } from "@langchain/langgraph";
+import { ASSISTANTS, mapAssistantTools } from "./agent/assistants";
 import { buildAgentGraph } from "./agent/graph";
 import { parseFaultPlan, withFaults } from "./mocks/faults";
 import {
   createSupportService,
   type SupportService,
 } from "./agent/support-service";
-import { READ_TOOLS } from "./agent/tools";
 import { loadLimits, loadModelConfig } from "./config/env";
 import { createChatModel } from "./model/factory";
 import { createEscalationStore, createTicketRepository } from "./mocks/stores";
@@ -29,6 +29,7 @@ export function getRuntime(): Runtime {
 function createRuntime(): Runtime {
   const modelConfig = loadModelConfig();
   const limits = loadLimits();
+  const faultPlan = parseFaultPlan(process.env.FAULT_PLAN);
   const deps = {
     tickets: createTicketRepository(),
     escalations: createEscalationStore(),
@@ -37,7 +38,9 @@ function createRuntime(): Runtime {
     model: createChatModel(modelConfig, limits),
     deps,
     checkpointer: new MemorySaver(),
-    tools: withFaults(READ_TOOLS, parseFaultPlan(process.env.FAULT_PLAN)),
+    assistants: mapAssistantTools(ASSISTANTS, (tools) =>
+      withFaults(tools, faultPlan),
+    ),
     limits,
   });
   return {

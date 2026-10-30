@@ -348,6 +348,7 @@ describe("GET /api/sessions/:id", () => {
       await (await handleGetSession(ctx.sessionId, ctx.service)).json(),
     ).toEqual({
       sessionId: ctx.sessionId,
+      assistantId: "support",
       entries: [],
       proposal: null,
     });
@@ -385,6 +386,7 @@ describe("DELETE /api/sessions/:id", () => {
       expect((await handleDeleteSession(id, ctx.service)).status).toBe(204);
       expect(await (await handleGetSession(id, ctx.service)).json()).toEqual({
         sessionId: id,
+        assistantId: "support",
         entries: [],
         proposal: null,
       });

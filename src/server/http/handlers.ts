@@ -1,7 +1,8 @@
 import { traceable } from "langsmith/traceable";
 import type { ApiError, StreamEvent } from "@/lib/stream-events";
+import { DEFAULT_ASSISTANT } from "../agent/assistants";
 import {
-  ASSISTANT_NAME,
+  APP_TAG,
   type DecisionOutcome,
   type SupportService,
 } from "../agent/support-service";
@@ -98,7 +99,7 @@ export async function handleChat(request: Request, service: SupportService) {
   // session cannot interleave (e.g. two tabs).
   const release = await service.lock.acquire(sessionId);
   const prepared = await service
-    .prepareMessage(sessionId, body.message)
+    .prepareMessage(sessionId, body.message, body.assistantId)
     .catch(() => null);
   if (!prepared?.ok) {
     release();
@@ -121,10 +122,11 @@ export async function handleApproval(
 
   const release = await service.lock.acquire(sessionId);
   const prepared = await service
-    .prepareDecision(sessionId, {
-      proposalId: body.proposalId,
-      decision: body.decision,
-    })
+    .prepareDecision(
+      sessionId,
+      { proposalId: body.proposalId, decision: body.decision },
+      body.assistantId,
+    )
     .catch(() => null);
   if (!prepared?.ok) {
     release();
@@ -141,8 +143,11 @@ export async function handleApproval(
       {
         name: "decision",
         run_type: "chain",
-        tags: [ASSISTANT_NAME, "decision", "replay"],
-        metadata: { session_id: sessionId, assistant: ASSISTANT_NAME },
+        tags: [APP_TAG, "decision", "replay"],
+        metadata: {
+          session_id: sessionId,
+          assistant: body.assistantId ?? DEFAULT_ASSISTANT,
+        },
       },
     )({
       proposalId: body.proposalId,
@@ -163,19 +168,25 @@ export async function handleApproval(
   );
 }
 
+/** The assistant of a session comes from the `assistant` query parameter. */
+export const assistantParam = (request: Request) =>
+  new URL(request.url).searchParams.get("assistant") ?? undefined;
+
 export async function handleGetSession(
   sessionId: string,
   service: SupportService,
+  assistantId?: string,
 ) {
-  const result = await service.getSession(sessionId);
+  const result = await service.getSession(sessionId, assistantId);
   return result.ok ? Response.json(result.data) : errorResponse(result.error);
 }
 
 export async function handleDeleteSession(
   sessionId: string,
   service: SupportService,
+  assistantId?: string,
 ) {
-  const result = await service.deleteSession(sessionId);
+  const result = await service.deleteSession(sessionId, assistantId);
   return result.ok
     ? new Response(null, { status: 204 })
     : errorResponse(result.error);

@@ -16,6 +16,12 @@ import { fail, ok, type Result } from "../shared/result";
 import { createSessionLock } from "../shared/session-lock";
 import type { Escalonamento } from "../tickets/schemas";
 import type { TicketDeps } from "../tickets/operations";
+import {
+  DEFAULT_ASSISTANT,
+  assistantIdSchema,
+  threadIdFor,
+  type AssistantId,
+} from "./assistants";
 import { endTurnWithError, type AgentGraph } from "./graph";
 import { decisionSchema, type Proposal } from "./proposal";
 import { NEW_TURN, type AgentStateValue, type TurnError } from "./state";
@@ -38,7 +44,7 @@ export type DecisionOutcome =
   | { status: "already_processed"; resolution: "rejected" };
 
 type RunConfig = {
-  configurable: { thread_id: string };
+  configurable: { thread_id: string; assistant_id: AssistantId };
   recursionLimit: number;
   /** Tracing: one root run per request, grouped by session in LangSmith. */
   runId?: string;
@@ -47,7 +53,25 @@ type RunConfig = {
   metadata?: Record<string, unknown>;
 };
 
-export const ASSISTANT_NAME = "aurora-support";
+/** Tag on every trace of the app, whatever the assistant. */
+export const APP_TAG = "aurora-support";
+
+/** A conversation: one session of one assistant. */
+type SessionRef = { sessionId: string; assistantId: AssistantId };
+
+function parseSession(
+  sessionId: string,
+  assistantId: unknown,
+): Result<SessionRef> {
+  if (!sessionIdSchema.safeParse(sessionId).success) {
+    return fail("INVALID_INPUT", "Sessão inválida");
+  }
+  const assistant = assistantIdSchema.safeParse(
+    assistantId ?? DEFAULT_ASSISTANT,
+  );
+  if (!assistant.success) return fail("INVALID_INPUT", "Assistente inválido");
+  return ok({ sessionId, assistantId: assistant.data });
+}
 
 /** What the caller must run next: a graph input (invoke or stream) or a stored outcome. */
 export type PreparedTurn = { kind: "run"; input: unknown; config: RunConfig };
@@ -73,39 +97,48 @@ export function createSupportService(
   /** Serializes work per session so concurrent requests cannot interleave. */
   const lock = createSessionLock();
 
-  const configFor = (sessionId: string): RunConfig => ({
-    configurable: { thread_id: sessionId },
+  // The assistant picks the graph configuration and is part of the thread id,
+  // so the same session id never shares history across assistants.
+  const configFor = ({ sessionId, assistantId }: SessionRef): RunConfig => ({
+    configurable: {
+      thread_id: threadIdFor(assistantId, sessionId),
+      assistant_id: assistantId,
+    },
     recursionLimit,
   });
 
   const runConfigFor = (
-    sessionId: string,
+    ref: SessionRef,
     runName: string,
     metadata: Record<string, unknown> = {},
   ): RunConfig => ({
-    ...configFor(sessionId),
+    ...configFor(ref),
     runId: randomUUID(),
     runName,
-    tags: [ASSISTANT_NAME, runName],
-    metadata: { session_id: sessionId, assistant: ASSISTANT_NAME, ...metadata },
+    tags: [APP_TAG, ref.assistantId, runName],
+    metadata: {
+      session_id: ref.sessionId,
+      assistant: ref.assistantId,
+      ...metadata,
+    },
   });
 
-  async function readState(sessionId: string) {
-    const snapshot = await graph.getState(configFor(sessionId));
+  async function readState(ref: SessionRef) {
+    const snapshot = await graph.getState(configFor(ref));
     return snapshot.values as Partial<AgentStateValue>;
   }
 
   async function prepareMessage(
     sessionId: string,
     text: unknown,
+    assistantId?: unknown,
   ): Promise<Result<PreparedTurn>> {
-    if (!sessionIdSchema.safeParse(sessionId).success) {
-      return fail("INVALID_INPUT", "Sessão inválida");
-    }
+    const ref = parseSession(sessionId, assistantId);
+    if (!ref.ok) return ref;
     const message = messageSchema.safeParse(text);
     if (!message.success) return fail("INVALID_INPUT", "Mensagem inválida");
 
-    const state = await readState(sessionId);
+    const state = await readState(ref.data);
     if (state.proposal) {
       return fail(
         "APPROVAL_PENDING",
@@ -120,27 +153,27 @@ export function createSupportService(
         turn: { ...NEW_TURN },
         error: null,
       },
-      config: runConfigFor(sessionId, "message"),
+      config: runConfigFor(ref.data, "message"),
     });
   }
 
   async function prepareDecision(
     sessionId: string,
     body: unknown,
+    assistantId?: unknown,
   ): Promise<Result<PreparedDecision>> {
-    if (!sessionIdSchema.safeParse(sessionId).success) {
-      return fail("INVALID_INPUT", "Sessão inválida");
-    }
+    const ref = parseSession(sessionId, assistantId);
+    if (!ref.ok) return ref;
     const parsed = decisionSchema.safeParse(body);
     if (!parsed.success) return fail("INVALID_INPUT", "Decisão inválida");
     const { proposalId, decision } = parsed.data;
 
-    const state = await readState(sessionId);
+    const state = await readState(ref.data);
     if (state.proposal?.id === proposalId) {
       return ok({
         kind: "run",
         input: new Command({ resume: parsed.data }),
-        config: runConfigFor(sessionId, "decision", { proposalId, decision }),
+        config: runConfigFor(ref.data, "decision", { proposalId, decision }),
       });
     }
 
@@ -259,11 +292,10 @@ export function createSupportService(
   }
 
   /** Visible history of a session: messages and tool activity, in order. */
-  async function getSession(sessionId: string) {
-    if (!sessionIdSchema.safeParse(sessionId).success) {
-      return fail("INVALID_INPUT", "Sessão inválida");
-    }
-    const state = await readState(sessionId);
+  async function getSession(sessionId: string, assistantId?: unknown) {
+    const ref = parseSession(sessionId, assistantId);
+    if (!ref.ok) return ref;
+    const state = await readState(ref.data);
     const entries: HistoryEntry[] = [];
     for (const message of state.messages ?? []) {
       if (HumanMessage.isInstance(message)) {
@@ -281,22 +313,29 @@ export function createSupportService(
         else entries.push({ type: "activity", items: [toActivityItem(event)] });
       }
     }
-    return ok({ sessionId, entries, proposal: state.proposal ?? null });
+    return ok({
+      sessionId,
+      assistantId: ref.data.assistantId,
+      entries,
+      proposal: state.proposal ?? null,
+    });
   }
 
   /**
    * Deletes the session's history and any pending proposal. Registered
    * escalations are kept: they are records, not conversation state.
    */
-  function deleteSession(sessionId: string): Promise<Result<null>> {
-    if (!sessionIdSchema.safeParse(sessionId).success) {
-      return Promise.resolve(fail("INVALID_INPUT", "Sessão inválida"));
-    }
+  function deleteSession(
+    sessionId: string,
+    assistantId?: unknown,
+  ): Promise<Result<null>> {
+    const ref = parseSession(sessionId, assistantId);
+    if (!ref.ok) return Promise.resolve(ref);
     // Waits for a running turn of this session to finish first.
     return lock.run(sessionId, async () => {
       const saver = graph.checkpointer;
       if (saver && typeof saver !== "boolean") {
-        await saver.deleteThread(sessionId);
+        await saver.deleteThread(configFor(ref.data).configurable.thread_id);
       }
       return ok(null);
     });
@@ -314,17 +353,22 @@ export function createSupportService(
     sendMessage(
       sessionId: string,
       text: unknown,
+      assistantId?: unknown,
     ): Promise<Result<TurnOutcome>> {
       return lock.run(sessionId, async () => {
-        const prepared = await prepareMessage(sessionId, text);
+        const prepared = await prepareMessage(sessionId, text, assistantId);
         if (!prepared.ok) return prepared;
         return ok(await run(prepared.data));
       });
     },
 
-    decide(sessionId: string, body: unknown): Promise<Result<DecisionOutcome>> {
+    decide(
+      sessionId: string,
+      body: unknown,
+      assistantId?: unknown,
+    ): Promise<Result<DecisionOutcome>> {
       return lock.run(sessionId, async () => {
-        const prepared = await prepareDecision(sessionId, body);
+        const prepared = await prepareDecision(sessionId, body, assistantId);
         if (!prepared.ok) return prepared;
         if (prepared.data.kind === "replay") return ok(prepared.data.outcome);
         return ok(await run(prepared.data));

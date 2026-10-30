@@ -2,6 +2,7 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { MemorySaver } from "@langchain/langgraph";
 import { randomUUID } from "node:crypto";
 import type { Limits } from "../config/env";
+import { threadIdFor } from "../agent/assistants";
 import { buildAgentGraph } from "../agent/graph";
 import type { AgentStateValue } from "../agent/state";
 import { createSupportService, toTurnOutcome } from "../agent/support-service";
@@ -35,7 +36,9 @@ export function agentTarget(model: BaseChatModel, limits?: Limits): Target {
     await service.sendMessage(sessionId, message);
 
     const state = (
-      await graph.getState({ configurable: { thread_id: sessionId } })
+      await graph.getState({
+        configurable: { thread_id: threadIdFor("support", sessionId) },
+      })
     ).values as AgentStateValue;
     const outcome = toTurnOutcome(state);
     return {
