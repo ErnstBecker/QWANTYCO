@@ -54,12 +54,20 @@ export function ChatPanel({
     useSupportSession(sessionId);
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const busy = status !== "idle";
-  const blocked = busy || proposal !== null;
+  const awaitingDecision = proposal !== null;
+  const blocked = busy || awaitingDecision;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [entries, proposal]);
+
+  // The input is only disabled while a proposal awaits a decision, which
+  // drops its focus; give it back once the decision is made.
+  useEffect(() => {
+    if (!awaitingDecision) inputRef.current?.focus();
+  }, [sessionId, awaitingDecision]);
 
   const submit = (text: string) => {
     const message = text.trim();
@@ -130,9 +138,10 @@ export function ChatPanel({
         </label>
         <input
           id="message"
+          ref={inputRef}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          disabled={blocked}
+          disabled={awaitingDecision}
           maxLength={4000}
           placeholder={
             proposal
