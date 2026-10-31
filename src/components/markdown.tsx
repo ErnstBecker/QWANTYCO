@@ -4,6 +4,17 @@ import remarkGfm from "remark-gfm";
 // Model output is rendered as Markdown; raw HTML is not allowed by react-markdown.
 const components: Components = {
   p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  // One level below the page h1; sizes stay small for a chat bubble.
+  h1: ({ children }) => (
+    <h2 className="mb-2 text-base font-semibold last:mb-0">{children}</h2>
+  ),
+  h2: ({ children }) => (
+    <h3 className="mt-3 mb-1 font-semibold first:mt-0">{children}</h3>
+  ),
+  h3: ({ children }) => (
+    <h4 className="mt-3 mb-1 font-semibold first:mt-0">{children}</h4>
+  ),
+  hr: () => <hr className="my-3 border-black/10 dark:border-white/10" />,
   ul: ({ children }) => (
     <ul className="mb-2 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>
   ),
