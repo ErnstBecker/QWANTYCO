@@ -1,4 +1,5 @@
 import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // Model output is rendered as Markdown; raw HTML is not allowed by react-markdown.
 const components: Components = {
@@ -23,6 +24,22 @@ const components: Components = {
       {children}
     </code>
   ),
+  // Tables scroll inside the bubble instead of widening the page.
+  table: ({ children }) => (
+    <div className="mb-2 max-w-full overflow-x-auto last:mb-0">
+      <table className="border-collapse text-left text-xs">{children}</table>
+    </div>
+  ),
+  th: ({ children }) => (
+    <th className="border-b border-black/20 px-2 py-1 font-semibold dark:border-white/20">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="border-b border-black/10 px-2 py-1 dark:border-white/10">
+      {children}
+    </td>
+  ),
   a: ({ children, href }) => (
     <a href={href} target="_blank" rel="noreferrer" className="underline">
       {children}
@@ -31,5 +48,9 @@ const components: Components = {
 };
 
 export function Markdown({ text }: { text: string }) {
-  return <ReactMarkdown components={components}>{text}</ReactMarkdown>;
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      {text}
+    </ReactMarkdown>
+  );
 }
